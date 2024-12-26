@@ -1,0 +1,14 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v4.3.6
+_src_path: https://github.com/jupyterlab/extension-template
+author_email: v.soancatl.aguilar@rug.nl
+author_name: Venustiano
+has_binder: true
+has_settings: true
+kind: frontend
+labextension_name: jupyterlab_bsshconn
+project_short_description: A JupyterLab extension for ssh connections.
+python_name: jupyterlab_bsshconn
+repository: https://github.com/Venustiano/bsshconn
+test: true
+
