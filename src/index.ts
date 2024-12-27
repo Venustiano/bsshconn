@@ -9,7 +9,8 @@ import { ICommandPalette, MainAreaWidget } from '@jupyterlab/apputils';
 
 import { Widget } from '@lumino/widgets';
 import { Terminal } from '@jupyterlab/terminal';
-import { TerminalManager } from '@jupyterlab/services';
+import { IStatusBar } from '@jupyterlab/statusbar';
+// import { TerminalManager } from '@jupyterlab/services';
 
 /**
  * Initialization data for the jupyterlab_bsshconn extension.
@@ -18,11 +19,27 @@ const plugin: JupyterFrontEndPlugin<void> = {
   id: 'jupyterlab_bsshconn:plugin',
   description: 'A JupyterLab extension for SSH connections.',
   autoStart: true,
-  optional: [ISettingRegistry],
+  optional: [ISettingRegistry, IStatusBar],
   requires: [ICommandPalette],
-  activate: async (app: JupyterFrontEnd, palette: ICommandPalette, settingRegistry: ISettingRegistry | null) => {
+  activate: async (
+      app: JupyterFrontEnd, 
+      palette: ICommandPalette, 
+      settingRegistry: ISettingRegistry | null,
+      statusBar: IStatusBar | null
+  ) => {
     console.log('JupyterLab extension jupyterlab_bsshconn is activated!');
     console.log('ICommandPalette:', palette);
+
+    // Create a status bar item
+    let statusMessage = 'Ready';
+    const statusWidget = new Widget();
+    statusWidget.node.textContent = statusMessage;
+    if (statusBar) {
+      statusBar.registerStatusItem('ssh-connection-status', {
+        align: 'left',
+        item: statusWidget,
+      });
+    }
 
     // Define a widget creator function,
     // then call it to make a new widget
@@ -52,7 +69,23 @@ const plugin: JupyterFrontEndPlugin<void> = {
             </div>
             <button type="button" id="connect-button" style="padding: 10px 20px;">Connect</button>
           </form>
-        </div>
+        <h2>Running a VLLM</h2>
+        <form id="vllm-form" style="padding: 20px;">
+          <div style="margin-bottom: 10px;">
+            <label for="model-select">Select a Model:</label>
+            <select id="model-select" name="model-select" style="width: 100%; padding: 8px;">
+                <option value="google/gemma-2b">google/gemma-2b</option>
+                <option value="mistralai/Mistral-7B-v0.1">mistralai/Mistral-7B-v0.1</option>
+                <option value="neuralmagic/Meta-Llama-3.1-8B-Instruct-quantized.w8a16" selected>
+                    neuralmagic/Meta-Llama-3.1-8B-Instruct-quantized.w8a16
+                </option>
+            </select>
+          </div>
+          <div style="margin-top: 20px;">
+            <button type="button" id="run-model-button" style="padding: 10px 20px;">Run Model</button>
+          </div>
+        </form>
+      </div>
       `;
 
       // Add event listener for the Connect button
@@ -64,18 +97,18 @@ const plugin: JupyterFrontEndPlugin<void> = {
         const twoFactorCode = (content.node.querySelector('#twofa') as HTMLInputElement).value;
 
         if (!username || !host || !password || !twoFactorCode) {
-          alert('Please fill in all fields.');
+          statusMessage = 'Please fill in all fields.';
+          statusWidget.node.textContent = statusMessage;
           return;
         }
 
         try {
 
-            const terminalManager = new TerminalManager();
-            const terminalConnection = await terminalManager.startNew();
+            // const terminalManager = new TerminalManager();
+            // const terminalConnection = await terminalManager.startNew();
+            
             // Create a new terminal session using the terminal manager
-          //const session = await app.serviceManager.terminals.startNew();
-          // Create a new terminal session with a specific path
-          //const session = await TerminalSession.startNew();
+          const terminalConnection = await app.serviceManager.terminals.startNew();
 
          
           // Create a new terminal session
@@ -84,11 +117,6 @@ const plugin: JupyterFrontEndPlugin<void> = {
           );
           app.shell.add(terminal, 'main');
           app.shell.activateById(terminal.id);
-
-          // if (!terminalWidget) {
-          //   alert('Failed to start a terminal session.');
-          //   return;
-          // }
 
           // Simulate the SSH connection process
           terminal.session.send({ type: 'stdin', content: [`ssh ${username}@${host}\n`] });
@@ -99,10 +127,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
             terminal.session.send({ type: 'stdin', content: [`${twoFactorCode}\n`] });
           }, 4000);
 
-          alert('Attempting SSH connection... Check the terminal for progress.');
+          statusMessage = 'SSH connection initiated. Check the terminal for progress.';
+          statusWidget.node.textContent = statusMessage;
         } catch (error) {
           console.error('Failed to establish an SSH connection:', error);
-          alert('Failed to establish an SSH connection. See the console for details.');
+          statusMessage = 'Failed to establish an SSH connection. Closing the terminal.';
+          statusWidget.node.textContent = statusMessage;
         }
       });
 
