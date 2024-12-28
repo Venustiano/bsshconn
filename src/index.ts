@@ -10,7 +10,6 @@ import { ICommandPalette, MainAreaWidget } from '@jupyterlab/apputils';
 import { Widget } from '@lumino/widgets';
 import { Terminal } from '@jupyterlab/terminal';
 import { IStatusBar } from '@jupyterlab/statusbar';
-// import { TerminalManager } from '@jupyterlab/services';
 
 /**
  * Initialization data for the jupyterlab_bsshconn extension.
@@ -90,6 +89,14 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
       // Add event listener for the Connect button
       const connectButton = content.node.querySelector('#connect-button') as HTMLButtonElement;
+      const vllmForm = content.node.querySelector('#vllm-form') as HTMLFormElement;
+      const runModelButton = content.node.querySelector('#run-model-button') as HTMLButtonElement;
+
+      vllmForm.style.pointerEvents = 'none'; // Initially disable the form
+
+      // Declare terminal in a scope accessible to both event listeners
+      let terminal: Terminal | null = null;
+        
       connectButton?.addEventListener('click', async () => {
         const username = (content.node.querySelector('#username') as HTMLInputElement).value;
         const host = (content.node.querySelector('#host') as HTMLInputElement).value;
@@ -101,37 +108,83 @@ const plugin: JupyterFrontEndPlugin<void> = {
           statusWidget.node.textContent = statusMessage;
           return;
         }
-
+          
         try {
 
             // const terminalManager = new TerminalManager();
             // const terminalConnection = await terminalManager.startNew();
-            
-            // Create a new terminal session using the terminal manager
+          // Create a new terminal session using the terminal manager
           const terminalConnection = await app.serviceManager.terminals.startNew();
 
-         
           // Create a new terminal session
-          const terminal = new Terminal(
-              terminalConnection
-          );
+          terminal = new Terminal(terminalConnection);
+   
           app.shell.add(terminal, 'main');
           app.shell.activateById(terminal.id);
+
+            // console.log('Attaching messageReceived handler...');
+            // terminal.session.messageReceived.connect((_, message) => {
+            //   console.log('Message received:', message);
+            // });
+            
+          // Attach a listener for messages received from the terminal
+          terminal.session.messageReceived.connect((_, message) => {
+              if (message.type === 'stdout') {
+                  statusMessage = message.content?.join('') || '';
+                  console.log('STDOUT:', statusMessage);
+                  statusWidget.node.textContent = statusMessage;
+              } else if (message.type === 'disconnect') {
+                  statusMessage = 'Terminal disconnected.';
+                  console.warn(statusMessage);
+                  statusWidget.node.textContent = statusMessage;                
+              } else {
+                console.log('Message received:', message);
+              }
+          });
 
           // Simulate the SSH connection process
           terminal.session.send({ type: 'stdin', content: [`ssh ${username}@${host}\n`] });
           setTimeout(() => {
-            terminal.session.send({ type: 'stdin', content: [`${password}\n`] });
+            terminal?.session.send({ type: 'stdin', content: [`${password}\n`] });
           }, 2000);
           setTimeout(() => {
-            terminal.session.send({ type: 'stdin', content: [`${twoFactorCode}\n`] });
+            terminal?.session.send({ type: 'stdin', content: [`${twoFactorCode}\n`] });
           }, 4000);
 
-          statusMessage = 'SSH connection initiated. Check the terminal for progress.';
-          statusWidget.node.textContent = statusMessage;
+          // statusMessage = 'SSH connection successful.';
+          // statusWidget.node.textContent = statusMessage;
+          vllmForm.style.pointerEvents = 'auto'; // Enable the form on success
         } catch (error) {
           console.error('Failed to establish an SSH connection:', error);
           statusMessage = 'Failed to establish an SSH connection. Closing the terminal.';
+          statusWidget.node.textContent = statusMessage;
+          if (terminal) {
+            terminal.dispose();
+          }
+          vllmForm.style.pointerEvents = 'none'; // Disable the form on failure
+        }
+      });
+
+      runModelButton?.addEventListener('click', async () => {
+        if (!terminal) {
+          statusMessage = 'No active terminal. Cannot run model.';
+          statusWidget.node.textContent = statusMessage;
+          return;
+        }
+
+        const model = (content.node.querySelector('#model-select') as HTMLSelectElement).value;
+        try {
+          terminal.session.send({
+            type: 'stdin',
+            content: [`/scratch/public/repro_containers/vllm_container.sh ${model}\n`],
+          });
+          
+          statusMessage = `Running model: ${model}`;
+          statusWidget.node.textContent = statusMessage;
+          
+        } catch (error) {
+          console.error('Failed to run the model:', error);
+          statusMessage = 'Failed to run the model.';
           statusWidget.node.textContent = statusMessage;
         }
       });
