@@ -87,6 +87,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
       </div>
       `;
 
+      // Variable to store the connection process state
+      // let connectedToHPC = false;
+      let jobid: string | null = null;
+      let node: string | null = null;
+      let port: string | null = null;
+
       // Add event listener for the Connect button
       const connectButton = content.node.querySelector('#connect-button') as HTMLButtonElement;
       const vllmForm = content.node.querySelector('#vllm-form') as HTMLFormElement;
@@ -115,17 +121,13 @@ const plugin: JupyterFrontEndPlugin<void> = {
             // const terminalConnection = await terminalManager.startNew();
           // Create a new terminal session using the terminal manager
           const terminalConnection = await app.serviceManager.terminals.startNew();
+          const terminalConnection2 = await app.serviceManager.terminals.startNew();
 
           // Create a new terminal session
           terminal = new Terminal(terminalConnection);
    
           app.shell.add(terminal, 'main');
           app.shell.activateById(terminal.id);
-
-            // console.log('Attaching messageReceived handler...');
-            // terminal.session.messageReceived.connect((_, message) => {
-            //   console.log('Message received:', message);
-            // });
             
           // Attach a listener for messages received from the terminal
           terminal.session.messageReceived.connect((_, message) => {
@@ -133,6 +135,94 @@ const plugin: JupyterFrontEndPlugin<void> = {
                   statusMessage = message.content?.join('') || '';
                   console.log('STDOUT:', statusMessage);
                   statusWidget.node.textContent = statusMessage;
+
+                  // Handle SSH host authenticity prompt
+                  if (statusMessage.includes("Are you sure you want to continue connecting")) {
+                    terminal?.session.send({ type: 'stdin', content: ['yes\n'] });
+                  }
+                  // Handle password prompt
+                  else if (statusMessage.toLowerCase().includes('password:')) {
+                    terminal?.session.send({ type: 'stdin', content: [`${password}\n`] });
+                  }
+                  // Handle 2FA prompt
+                  else if (statusMessage.toLowerCase().includes('authenticator code')) {
+                    terminal?.session.send({ type: 'stdin', content: [`${twoFactorCode}\n`] });
+                  }
+                  else if (statusMessage.toLowerCase().includes('welcome to')) {
+                    // connectedToHPC = true;
+                    statusMessage = 'SSH connection successful.';
+                    statusWidget.node.textContent = statusMessage;
+                    vllmForm.style.pointerEvents = 'auto'; // Enable the form on success
+                  }
+                  // Extract jobid and node/host
+                  else if (statusMessage.includes('job') || statusMessage.includes('nodes')) {
+                    const jobMatch = statusMessage.match(/job (\d+)/);
+                    const nodeMatch = statusMessage.match(/Nodes (\S+)/);
+                    if (jobMatch) {
+                        jobid = jobMatch[1];
+                        console.log('Job ID:', jobid);
+                    }
+                    if (nodeMatch) {
+                        node = nodeMatch[1];
+                        console.log('Node/Host:', node);
+                    }
+                  }
+                  // Extract the port where vLLM is served
+                  else if (statusMessage.toLowerCase().includes('uvicorn running on')) {
+                    const portMatch = statusMessage.match(/http:\/\/\S+:(\d+)/);
+                    if (portMatch) {
+                        port = portMatch[1];
+                        console.log('vLLM Port:', port);
+                    }
+                  }
+
+                  // Trigger the SSH tunnel code if all details are ready
+                  if (jobid && node && port) {
+                    console.log('All details found. Establishing SSH tunnel...');
+                    const localPort = '8080';
+                    const sshCommand = `ssh -L ${localPort}:${node}:${port} ${username}@${host}`;
+                    // Create a new terminal session
+                    const terminal2 = new Terminal(terminalConnection2);
+   
+                    app.shell.add(terminal2, 'main');
+                    app.shell.activateById(terminal2.id);
+
+                              // Attach a listener for messages received from the terminal
+                    terminal2.session.messageReceived.connect((_, message) => {
+                      if (message.type === 'stdout') {
+                          statusMessage = message.content?.join('') || '';
+                          console.log('STDOUT:', statusMessage);
+                          statusWidget.node.textContent = statusMessage;
+
+                          // Handle SSH host authenticity prompt
+                          if (statusMessage.includes("Are you sure you want to continue connecting")) {
+                            terminal2?.session.send({ type: 'stdin', content: ['yes\n'] });
+                          }
+                          // Handle password prompt
+                          else if (statusMessage.toLowerCase().includes('password:')) {
+                            terminal2?.session.send({ type: 'stdin', content: [`${password}\n`] });
+                          }
+                          // Handle 2FA prompt
+                          else if (statusMessage.toLowerCase().includes('authenticator code')) {
+                            terminal2?.session.send({ type: 'stdin', content: [`${twoFactorCode}\n`] });
+                          }
+                          else if (statusMessage.toLowerCase().includes('welcome to')) {
+                            // connectedToHPC = true;
+                            statusMessage = 'SSH tunnel established!';
+                            statusWidget.node.textContent = statusMessage;
+                            vllmForm.style.pointerEvents = 'none'; // Disable the form
+                            // TODO: Is it better to disable when the user runs the model
+                            // TODO: Test the VLLM api
+                            // TODO: Enable it when the model is shutdown, allowing the user test another model
+                          }
+                      }
+                    });
+
+                    terminal2.session.send({
+                        type: 'stdin',
+                        content: [sshCommand + '\n'],
+                    });
+                }
               } else if (message.type === 'disconnect') {
                   statusMessage = 'Terminal disconnected.';
                   console.warn(statusMessage);
@@ -142,18 +232,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
               }
           });
 
-          // Simulate the SSH connection process
+          // Initiate SSH connection process
           terminal.session.send({ type: 'stdin', content: [`ssh ${username}@${host}\n`] });
-          setTimeout(() => {
-            terminal?.session.send({ type: 'stdin', content: [`${password}\n`] });
-          }, 2000);
-          setTimeout(() => {
-            terminal?.session.send({ type: 'stdin', content: [`${twoFactorCode}\n`] });
-          }, 4000);
 
-          // statusMessage = 'SSH connection successful.';
-          // statusWidget.node.textContent = statusMessage;
-          vllmForm.style.pointerEvents = 'auto'; // Enable the form on success
         } catch (error) {
           console.error('Failed to establish an SSH connection:', error);
           statusMessage = 'Failed to establish an SSH connection. Closing the terminal.';
