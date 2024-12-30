@@ -14,6 +14,11 @@ import { IStatusBar } from '@jupyterlab/statusbar';
 /**
  * Initialization data for the jupyterlab_bsshconn extension.
  */
+
+// TODO: refactor the script, create a class
+// TODO: allow stopping the model
+// TODO: allow reloading the panel as in the astronomy tutorial
+
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'jupyterlab_bsshconn:plugin',
   description: 'A JupyterLab extension for SSH connections.',
@@ -82,6 +87,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
           </div>
           <div style="margin-top: 20px;">
             <button type="button" id="run-model-button" style="padding: 10px 20px;">Run Model</button>
+            <button type="button" id="stop-model-button" style="padding: 10px 20px; margin-left: 10px;">Stop Model</button>
           </div>
         </form>
       </div>
@@ -102,6 +108,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
       // Declare terminal in a scope accessible to both event listeners
       let terminal: Terminal | null = null;
+      let terminal2: Terminal | null = null;
         
       connectButton?.addEventListener('click', async () => {
         const username = (content.node.querySelector('#username') as HTMLInputElement).value;
@@ -116,9 +123,6 @@ const plugin: JupyterFrontEndPlugin<void> = {
         }
           
         try {
-
-            // const terminalManager = new TerminalManager();
-            // const terminalConnection = await terminalManager.startNew();
           // Create a new terminal session using the terminal manager
           const terminalConnection = await app.serviceManager.terminals.startNew();
           const terminalConnection2 = await app.serviceManager.terminals.startNew();
@@ -182,12 +186,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
                     const localPort = '8080';
                     const sshCommand = `ssh -L ${localPort}:${node}:${port} ${username}@${host}`;
                     // Create a new terminal session
-                    const terminal2 = new Terminal(terminalConnection2);
+                    terminal2 = new Terminal(terminalConnection2);
    
                     app.shell.add(terminal2, 'main');
                     app.shell.activateById(terminal2.id);
 
-                              // Attach a listener for messages received from the terminal
+                    // Attach a listener for messages received from the terminal
                     terminal2.session.messageReceived.connect((_, message) => {
                       if (message.type === 'stdout') {
                           statusMessage = message.content?.join('') || '';
