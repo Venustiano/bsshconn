@@ -103,7 +103,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
       const connectButton = content.node.querySelector('#connect-button') as HTMLButtonElement;
       const vllmForm = content.node.querySelector('#vllm-form') as HTMLFormElement;
       const runModelButton = content.node.querySelector('#run-model-button') as HTMLButtonElement;
-
+      const stopModelButton = content.node.querySelector('#stop-model-button') as HTMLButtonElement;
+      const modelSelect = content.node.querySelector('#model-select') as HTMLSelectElement;
+        
       vllmForm.style.pointerEvents = 'none'; // Initially disable the form
 
       // Declare terminal in a scope accessible to both event listeners
@@ -129,12 +131,33 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
           // Create a new terminal session
           terminal = new Terminal(terminalConnection);
+          terminal.id = 'terminal-ssh-connection';
+
    
           app.shell.add(terminal, 'main');
           app.shell.activateById(terminal.id);
+
+          terminal2 = new Terminal(terminalConnection2);
+          terminal2.id = 'terminal2-port-forwarding';
+   
+          app.shell.add(terminal2, 'main');
+          app.shell.activateById(terminal2.id);
+        } catch (error) {
+          console.error('Failed to create the terminals:', error);
+          statusMessage = 'Failed to create the terminals. Closing the terminal.';
+          statusWidget.node.textContent = statusMessage;
+          if (terminal) {
+            terminal.dispose();
+          }
+          if (terminal2) {
+            terminal2.dispose();
+          }
+          vllmForm.style.pointerEvents = 'none'; // Disable the form on failure
+        }
             
-          // Attach a listener for messages received from the terminal
-          terminal.session.messageReceived.connect((_, message) => {
+            
+         // Attach a listener for messages received from the terminal
+         terminal?.session.messageReceived.connect((_, message) => {
               if (message.type === 'stdout') {
                   statusMessage = message.content?.join('') || '';
                   console.log('STDOUT:', statusMessage);
@@ -157,6 +180,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
                     statusMessage = 'SSH connection successful.';
                     statusWidget.node.textContent = statusMessage;
                     vllmForm.style.pointerEvents = 'auto'; // Enable the form on success
+                    stopModelButton.disabled = true;
                   }
                   // Extract jobid and node/host
                   else if (statusMessage.includes('job') || statusMessage.includes('nodes')) {
@@ -177,22 +201,41 @@ const plugin: JupyterFrontEndPlugin<void> = {
                     if (portMatch) {
                         port = portMatch[1];
                         console.log('vLLM Port:', port);
+
+                        // Trigger the SSH tunnel code if all details are ready
+                        // TODO: find a better way to run this condition
+                        if (jobid && node && port) {
+                          console.log('All details found. Establishing SSH tunnel...');
+                          const localPort = port;
+                          console.log(`Port forwarding host: "${host}"`);
+                          const sshCommand = `ssh -L 127.0.0.1:${localPort}:${node}:${port} \\
+${username}@${host}`;
+                          console.log(`Generated SSH Command: "${sshCommand}"`);
+
+                          // login1.hb.hpc.rug.nl71083:~/develop/bsshconn> ssh -L 8000:a100gpu6:8000 p270806@l
+                          // (p270806@login1.hb.hpc.rug.nl) Password: 
+                          // bind [::1]:8000: Cannot assign requested address
+                          // Welcome to the login1 node of the Hábrók cluster!
+                          // Create a new terminal session
+
+                          terminal2?.session.send({
+                          type: 'stdin',
+                          content: [sshCommand + '\n'],
+                        });
+                      }
                     }
                   }
+              } else if (message.type === 'disconnect') {
+                  statusMessage = 'Terminal disconnected.';
+                  console.warn(statusMessage);
+                  statusWidget.node.textContent = statusMessage;                
+              } else {
+                console.log('Message received:', message);
+              }
+          });
 
-                  // Trigger the SSH tunnel code if all details are ready
-                  if (jobid && node && port) {
-                    console.log('All details found. Establishing SSH tunnel...');
-                    const localPort = '8080';
-                    const sshCommand = `ssh -L ${localPort}:${node}:${port} ${username}@${host}`;
-                    // Create a new terminal session
-                    terminal2 = new Terminal(terminalConnection2);
-   
-                    app.shell.add(terminal2, 'main');
-                    app.shell.activateById(terminal2.id);
-
-                    // Attach a listener for messages received from the terminal
-                    terminal2.session.messageReceived.connect((_, message) => {
+          // Attach a listener for messages received from the terminal
+          terminal2?.session.messageReceived.connect((_, message) => {
                       if (message.type === 'stdout') {
                           statusMessage = message.content?.join('') || '';
                           console.log('STDOUT:', statusMessage);
@@ -214,7 +257,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
                             // connectedToHPC = true;
                             statusMessage = 'SSH tunnel established!';
                             statusWidget.node.textContent = statusMessage;
-                            vllmForm.style.pointerEvents = 'none'; // Disable the form
+                            modelSelect.disabled = true;
+                            runModelButton.disabled = true;
+                            // vllmForm.style.pointerEvents = 'none'; // Disable the form
                             // TODO: Is it better to disable when the user runs the model
                             // TODO: Test the VLLM api
                             // TODO: Enable it when the model is shutdown, allowing the user test another model
@@ -222,32 +267,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
                       }
                     });
 
-                    terminal2.session.send({
-                        type: 'stdin',
-                        content: [sshCommand + '\n'],
-                    });
-                }
-              } else if (message.type === 'disconnect') {
-                  statusMessage = 'Terminal disconnected.';
-                  console.warn(statusMessage);
-                  statusWidget.node.textContent = statusMessage;                
-              } else {
-                console.log('Message received:', message);
-              }
-          });
-
           // Initiate SSH connection process
-          terminal.session.send({ type: 'stdin', content: [`ssh ${username}@${host}\n`] });
+          terminal?.session.send({ type: 'stdin', content: [`ssh ${username}@${host}\n`] });
 
-        } catch (error) {
-          console.error('Failed to establish an SSH connection:', error);
-          statusMessage = 'Failed to establish an SSH connection. Closing the terminal.';
-          statusWidget.node.textContent = statusMessage;
-          if (terminal) {
-            terminal.dispose();
-          }
-          vllmForm.style.pointerEvents = 'none'; // Disable the form on failure
-        }
       });
 
       runModelButton?.addEventListener('click', async () => {
@@ -273,6 +295,113 @@ const plugin: JupyterFrontEndPlugin<void> = {
           statusWidget.node.textContent = statusMessage;
         }
       });
+
+      // stopModelButton?.addEventListener('click', async () => {
+      //   const healthUrl = `http://localhost:${port}/health`;
+      //   try {
+      //   \\ verify that the vllm is up and running using 'healthUrl'
+
+      //   if (terminal2) {
+      //     statusMessage = 'Stop the tunnel.';
+      //     statusWidget.node.textContent = statusMessage;
+      //     try {
+      //         terminal2.session.send({
+      //           type: 'stdin',
+      //           content: [`exit\n`, `exit\n`],
+      //         }); 
+      //       } catch (error) {
+      //         console.error('Failed to stop the tunnel:', error);
+      //         statusMessage = 'Failed to stop the tunnel.';
+      //         statusWidget.node.textContent = statusMessage;
+      //       }
+      //   }
+
+      //   if (terminal) {
+      //     statusMessage = 'Stop the model.';
+      //     statusWidget.node.textContent = statusMessage;
+      //     try {
+      //         terminal.session.send({
+      //           type: 'stdin',
+      //           content: [/* put a double ctrl + c command */],
+      //         }); 
+      //       } catch (error) {
+      //         console.error('Failed to stop the model:', error);
+      //         statusMessage = 'Failed to stop the model.';
+      //         statusWidget.node.textContent = statusMessage;
+      //       }
+      //   }
+        
+          
+      //     statusMessage = `Stopping model: ${model}`;
+      //     statusWidget.node.textContent = statusMessage;
+          
+      //   } catch (error) {
+      //     console.error('Failed to stop the model:', error);
+      //     statusMessage = 'Failed to stop the model.';
+      //     statusWidget.node.textContent = statusMessage;
+      //   }
+      // });
+
+// srun: Complete StepId=14456526.0 received
+// slurmstepd: error: *** STEP 14456526.0 ON a100gpu1 CANCELLED AT 2024-12-31T23:30:56 ***
+// srun: Received task exit notification for 1 task of StepId=14456526.0 (status=0x0009).
+// srun: a100gpu1: task 0: Killed
+// srun: Terminating StepId=14456526.0
+// srun: First task exited. Terminating job in 15s
+
+
+      stopModelButton?.addEventListener('click', async () => {
+        const healthUrl = `http://localhost:${port}/health`;
+        const model = (content.node.querySelector('#model-select') as HTMLSelectElement).value;
+
+        try {
+          // Verify that the vLLM is up and running using 'healthUrl'
+          const response = await fetch(healthUrl);
+          if (response.ok) {
+            if (terminal2) {
+              statusMessage = 'Stop the tunnel.';
+              statusWidget.node.textContent = statusMessage;
+              try {
+                terminal2.session.send({
+                  type: 'stdin',
+                  content: [`exit\n`, `exit\n`],
+                });
+              } catch (error) {
+                console.error('Failed to stop the tunnel:', error);
+                statusMessage = 'Failed to stop the tunnel.';
+                statusWidget.node.textContent = statusMessage;
+              }
+            }
+
+            if (terminal) {
+              statusMessage = 'Stop the model.';
+              statusWidget.node.textContent = statusMessage;
+              try {
+                terminal.session.send({
+                  type: 'stdin',
+                  content: [`\x03\x03`], // Double Ctrl+C to stop the process
+                });
+              } catch (error) {
+                console.error('Failed to stop the model:', error);
+                statusMessage = 'Failed to stop the model.';
+                statusWidget.node.textContent = statusMessage;
+              }
+            }
+
+            statusMessage = `Stopping model: ${model}`;
+            statusWidget.node.textContent = statusMessage;
+          } else {
+            console.error(`Health check failed with status: ${response.status}`);
+            statusMessage = 'Model health check failed.';
+            statusWidget.node.textContent = statusMessage;
+          }
+        } catch (error) {
+          console.error('Failed to verify the health of the model:', error);
+          statusMessage = 'Failed to verify the health of the model.';
+          statusWidget.node.textContent = statusMessage;
+        }
+      });
+
 
       const widget = new MainAreaWidget({ content });
       widget.id = 'bsshconn-jupyterlab';
