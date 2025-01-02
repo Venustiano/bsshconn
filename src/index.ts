@@ -1,11 +1,16 @@
 import {
+//  ILayoutRestorer,
   JupyterFrontEnd,
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
 
-import { ICommandPalette, MainAreaWidget } from '@jupyterlab/apputils';
+import { 
+    ICommandPalette, 
+    MainAreaWidget,
+//    WidgetTracker
+} from '@jupyterlab/apputils';
 
 import { Widget } from '@lumino/widgets';
 import { Terminal } from '@jupyterlab/terminal';
@@ -77,6 +82,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
   autoStart: true,
   optional: [ISettingRegistry, IStatusBar],
   requires: [ICommandPalette],
+//  optional: [ILayoutRestorer],
   activate: async (
       app: JupyterFrontEnd, 
       palette: ICommandPalette, 
@@ -114,7 +120,6 @@ const plugin: JupyterFrontEndPlugin<void> = {
               <label for="host">Host:</label>
               <input type=\"text\" id=\"host\" name=\"host\" value=\"login1.hb.hpc.rug.nl\" placeholder=\"e.g., login1.hb.hpc.rug.nl\" style="width: 50%; padding: 8px;">
             </div>
-            </div>
             <div style="margin-bottom: 10px;">
               <label for="password">Password:</label>
               <input type="password" id="password" name="password" style="width: 50%; padding: 8px;">
@@ -123,10 +128,15 @@ const plugin: JupyterFrontEndPlugin<void> = {
               <label for="2fa">2FA Code:</label>
               <input type="text" id="twofa" name="twofa" style="width: 50%; padding: 8px;">
             </div>
-            <button type="button" id="connect-button" style="padding: 10px 20px;">Connect</button>
+            <div style="margin-top: 20px;">
+                <button type="button" id="connect-button" style="padding: 10px 20px;">Connect</button>
+                <button type="button" id="disconnect-button" style="padding: 10px 20px; margin-left: 10px;">Disonnect</button>
+            </div>
           </form>
-        <h2>Running a VLLM</h2>
-        <form id="vllm-form" style="padding: 20px;">
+        </div>
+      <div style="padding: 20px;">
+        <h2>VLLM</h2>
+        <form id="vllm-form">
           <div style="margin-bottom: 10px;">
             <label for="model-select">Select a Model:</label>
             <select id="model-select" name="model-select" style="width: 100%; padding: 8px;">
@@ -153,12 +163,15 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
       // Add event listener for the Connect button
       const connectButton = content.node.querySelector('#connect-button') as HTMLButtonElement;
+      const disconnectButton = content.node.querySelector('#disconnect-button') as HTMLButtonElement;
+
       const vllmForm = content.node.querySelector('#vllm-form') as HTMLFormElement;
       const runModelButton = content.node.querySelector('#run-model-button') as HTMLButtonElement;
       const stopModelButton = content.node.querySelector('#stop-model-button') as HTMLButtonElement;
       const modelSelect = content.node.querySelector('#model-select') as HTMLSelectElement;
         
       vllmForm.style.pointerEvents = 'none'; // Initially disable the form
+      disconnectButton.disabled = true;
 
       // Declare terminal in a scope accessible to both event listeners
       let terminal: Terminal | null = null;
@@ -175,6 +188,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
           statusWidget.node.textContent = statusMessage;
           return;
         }
+
+        const parentWidget = app.shell.currentWidget; // Capture the current active widget
           
         try {
           // Create a new terminal session using the terminal manager
@@ -185,18 +200,20 @@ const plugin: JupyterFrontEndPlugin<void> = {
           terminal = new Terminal(terminalConnection);
           terminal.id = 'terminal-ssh-connection';
 
-   
           app.shell.add(terminal, 'main');
-          app.shell.activateById(terminal.id);
-
+          // app.shell.activateById(terminal.id);
+            
           terminal2 = new Terminal(terminalConnection2);
           terminal2.id = 'terminal2-port-forwarding';
    
           app.shell.add(terminal2, 'main');
-          app.shell.activateById(terminal2.id);
+          // Re-focus on the parent widget
+          if (parentWidget) {
+              app.shell.activateById(parentWidget.id);
+          }
         } catch (error) {
           console.error('Failed to create the terminals:', error);
-          statusMessage = 'Failed to create the terminals. Closing the terminal.';
+          statusMessage = 'Failed to create the terminals. Closing the terminals.';
           statusWidget.node.textContent = statusMessage;
           if (terminal) {
             terminal.dispose();
@@ -207,13 +224,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
           vllmForm.style.pointerEvents = 'none'; // Disable the form on failure
         }
             
-            
          // Attach a listener for messages received from the terminal
          terminal?.session.messageReceived.connect((_, message) => {
               if (message.type === 'stdout') {
                   statusMessage = message.content?.join('') || '';
-                  console.log('STDOUT:', statusMessage);
-                  statusWidget.node.textContent = statusMessage;
+                  // console.log('STDOUT:', statusMessage);
+                  // statusWidget.node.textContent = statusMessage;
 
                   // Handle SSH host authenticity prompt
                   if (statusMessage.includes("Are you sure you want to continue connecting")) {
@@ -230,13 +246,14 @@ const plugin: JupyterFrontEndPlugin<void> = {
                   else if (statusMessage.toLowerCase().includes('welcome to')) {
                       // TODO: implement a more robust success condition
                     // connectedToHPC = true;
-                    statusMessage = 'SSH connection successful.';
+                    statusMessage = 'SSH connection successful. You can now select and run a model.';
                     statusWidget.node.textContent = statusMessage;
                     vllmForm.style.pointerEvents = 'auto'; // Enable the form on success
                     stopModelButton.disabled = true;
                   }
                   // Extract jobid and node/host
                   else if (statusMessage.includes('job') || statusMessage.includes('nodes')) {
+                    statusWidget.node.textContent = statusMessage;
                     const jobMatch = statusMessage.match(/job (\d+)/);
                     const nodeMatch = statusMessage.match(/Nodes (\S+)/);
                     if (jobMatch) {
@@ -265,7 +282,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
                           const sshCommand = `ssh -L 127.0.0.1:${localPort}:${node}:${port} \\
 ${username}@${host}`;
                           console.log(`Generated SSH Command: "${sshCommand}"`);
-
+                          
                           // login1.hb.hpc.rug.nl71083:~/develop/bsshconn> ssh -L 8000:a100gpu6:8000 p270806@l
                           // (p270806@login1.hb.hpc.rug.nl) Password: 
                           // bind [::1]:8000: Cannot assign requested address
@@ -273,9 +290,10 @@ ${username}@${host}`;
                           
                           // Create the ssh tunnel
                           terminal2?.session.send({
-                              type: 'stdin',
-                              content: [sshCommand + '\n'],
-                            });  
+                               type: 'stdin',
+                               content: [sshCommand + '\n'],
+                          });
+ 
                         }
                     }
                   }
@@ -473,6 +491,10 @@ ${username}@${host}`;
         if (widget.isDisposed) {
           widget = newWidget();
         }
+        // if (!tracker.has(widget)) {
+        // // Track the state of the widget for later restoration
+        // tracker.add(widget);
+        // }
         if (!widget.isAttached) {
           // Attach the widget to the main work area if it's not there
           app.shell.add(widget, 'main');
