@@ -76,6 +76,26 @@ import { IStatusBar } from '@jupyterlab/statusbar';
 // TODO: allow stopping the model
 // TODO: allow reloading the panel as in the astronomy tutorial
 
+
+// async function checkServerConnection(terminal: Terminal): Promise<boolean> {
+//     return new Promise((resolve) => {
+//         const testMessage = 'echo $HOSTNAME\n';
+//         let isConnected = false;
+
+//         terminal.session.send({ type: 'stdin', content: [testMessage] });
+
+//         terminal.session.messageReceived.connect((_, msg) => {
+//             // TODO: use a parameter instead of 'login'
+//             if (msg.content && msg.content.includes('login')) {
+//                 isConnected = true;
+//                 resolve(isConnected);
+//             }
+//         });
+//         // Timeout after 2 seconds
+//         setTimeout(() => resolve(isConnected), 2000);
+//     });
+// }
+
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'jupyterlab_bsshconn:plugin',
   description: 'A JupyterLab extension for SSH connections.',
@@ -130,7 +150,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
             </div>
             <div style="margin-top: 20px;">
                 <button type="button" id="connect-button" style="padding: 10px 20px;">Connect</button>
-                <button type="button" id="disconnect-button" style="padding: 10px 20px; margin-left: 10px;">Disonnect</button>
+                <button type="button" id="disconnect-button" style="padding: 10px 20px; margin-left: 10px;">Disconnect</button>
             </div>
           </form>
         </div>
@@ -176,6 +196,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       // Declare terminal in a scope accessible to both event listeners
       let terminal: Terminal | null = null;
       let terminal2: Terminal | null = null;
+
         
       connectButton?.addEventListener('click', async () => {
         const username = (content.node.querySelector('#username') as HTMLInputElement).value;
@@ -189,9 +210,11 @@ const plugin: JupyterFrontEndPlugin<void> = {
           return;
         }
 
-        const parentWidget = app.shell.currentWidget; // Capture the current active widget
           
         try {
+
+          const parentWidget = app.shell.currentWidget; // Capture the current active widget
+
           // Create a new terminal session using the terminal manager
           const terminalConnection = await app.serviceManager.terminals.startNew();
           const terminalConnection2 = await app.serviceManager.terminals.startNew();
@@ -202,11 +225,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
           app.shell.add(terminal, 'main');
           // app.shell.activateById(terminal.id);
-            
+
           terminal2 = new Terminal(terminalConnection2);
           terminal2.id = 'terminal2-port-forwarding';
    
           app.shell.add(terminal2, 'main');
+            
           // Re-focus on the parent widget
           if (parentWidget) {
               app.shell.activateById(parentWidget.id);
@@ -227,35 +251,37 @@ const plugin: JupyterFrontEndPlugin<void> = {
          // Attach a listener for messages received from the terminal
          terminal?.session.messageReceived.connect((_, message) => {
               if (message.type === 'stdout') {
-                  statusMessage = message.content?.join('') || '';
+                  let terminalMessage = message.content?.join('') || '';
                   // console.log('STDOUT:', statusMessage);
                   // statusWidget.node.textContent = statusMessage;
 
                   // Handle SSH host authenticity prompt
-                  if (statusMessage.includes("Are you sure you want to continue connecting")) {
+                  if (terminalMessage.includes("Are you sure you want to continue connecting")) {
                     terminal?.session.send({ type: 'stdin', content: ['yes\n'] });
                   }
                   // Handle password prompt
-                  else if (statusMessage.toLowerCase().includes('password:')) {
+                  else if (terminalMessage.toLowerCase().includes('password:')) {
                     terminal?.session.send({ type: 'stdin', content: [`${password}\n`] });
                   }
                   // Handle 2FA prompt
-                  else if (statusMessage.toLowerCase().includes('authenticator code')) {
+                  else if (terminalMessage.toLowerCase().includes('authenticator code')) {
                     terminal?.session.send({ type: 'stdin', content: [`${twoFactorCode}\n`] });
                   }
-                  else if (statusMessage.toLowerCase().includes('welcome to')) {
+                  else if (terminalMessage.toLowerCase().includes('welcome to')) {
                       // TODO: implement a more robust success condition
                     // connectedToHPC = true;
                     statusMessage = 'SSH connection successful. You can now select and run a model.';
                     statusWidget.node.textContent = statusMessage;
                     vllmForm.style.pointerEvents = 'auto'; // Enable the form on success
                     stopModelButton.disabled = true;
+                    disconnectButton.disabled = false;
+                    connectButton.disabled = true;
                   }
                   // Extract jobid and node/host
-                  else if (statusMessage.includes('job') || statusMessage.includes('nodes')) {
-                    statusWidget.node.textContent = statusMessage;
-                    const jobMatch = statusMessage.match(/job (\d+)/);
-                    const nodeMatch = statusMessage.match(/Nodes (\S+)/);
+                  else if (terminalMessage.includes('job') || statusMessage.includes('nodes')) {
+                    statusWidget.node.textContent = terminalMessage;
+                    const jobMatch = terminalMessage.match(/job (\d+)/);
+                    const nodeMatch = terminalMessage.match(/Nodes (\S+)/);
                     if (jobMatch) {
                         jobid = jobMatch[1];
                         console.log('Job ID:', jobid);
@@ -264,10 +290,18 @@ const plugin: JupyterFrontEndPlugin<void> = {
                         node = nodeMatch[1];
                         console.log('Node/Host:', node);
                     }
+                    if (terminalMessage.toLowerCase().includes('first task exited')) {
+                      stopModelButton.disabled = true;
+                      runModelButton.disabled = false;
+                      modelSelect.disabled = false;
+                      statusMessage = 'You can now select and run a model.';
+                      console.log(statusMessage);
+                      statusWidget.node.textContent = statusMessage;
+                    }
                   }
                   // Extract the port where vLLM is served
-                  else if (statusMessage.toLowerCase().includes('uvicorn running on')) {
-                    const portMatch = statusMessage.match(/http:\/\/\S+:(\d+)/);
+                  else if (terminalMessage.toLowerCase().includes('uvicorn running on')) {
+                    const portMatch = terminalMessage.match(/http:\/\/\S+:(\d+)/);
                     if (portMatch) {
                         port = portMatch[1];
                         console.log('vLLM Port:', port);
@@ -309,29 +343,28 @@ ${username}@${host}`;
           // Attach a listener for messages received from terminal2
           terminal2?.session.messageReceived.connect((_, message) => {
                       if (message.type === 'stdout') {
-                          statusMessage = message.content?.join('') || '';
-                          console.log('STDOUT:', statusMessage);
-                          statusWidget.node.textContent = statusMessage;
+                          let terminal2Message = message.content?.join('') || '';
+                          // console.log('STDOUT:', statusMessage);
+                          // statusWidget.node.textContent = statusMessage;
 
                           // Handle SSH host authenticity prompt
-                          if (statusMessage.includes("Are you sure you want to continue connecting")) {
+                          if (terminal2Message.includes("Are you sure you want to continue connecting")) {
                             terminal2?.session.send({ type: 'stdin', content: ['yes\n'] });
                           }
                           // Handle password prompt
-                          else if (statusMessage.toLowerCase().includes('password:')) {
+                          else if (terminal2Message.toLowerCase().includes('password:')) {
                             terminal2?.session.send({ type: 'stdin', content: [`${password}\n`] });
                           }
                           // Handle 2FA prompt
-                          else if (statusMessage.toLowerCase().includes('authenticator code')) {
+                          else if (terminal2Message.toLowerCase().includes('authenticator code')) {
                             terminal2?.session.send({ type: 'stdin', content: [`${twoFactorCode}\n`] });
                           }
-                          else if (statusMessage.toLowerCase().includes('welcome to')) {
+                          else if (terminal2Message.toLowerCase().includes('welcome to')) {
                             // connectedToHPC = true;
-                            statusMessage = 'SSH tunnel established!';
+                            statusMessage = 'VLLM running and ready to accept requests!';
                             statusWidget.node.textContent = statusMessage;
                             console.log('STDOUT:', statusMessage);
-                            modelSelect.disabled = true;
-                            runModelButton.disabled = true;
+                            
                             // vllmForm.style.pointerEvents = 'none'; // Disable the form
                             // TODO: Is it better to disable when the user runs the model
                             // TODO: Test the VLLM api
@@ -346,6 +379,7 @@ ${username}@${host}`;
       });
 
       runModelButton?.addEventListener('click', async () => {
+        // TODO: set the token as en environment variable
         if (!terminal) {
           statusMessage = 'No active terminal. Cannot run model.';
           statusWidget.node.textContent = statusMessage;
@@ -354,13 +388,16 @@ ${username}@${host}`;
 
         const model = (content.node.querySelector('#model-select') as HTMLSelectElement).value;
         try {
+
           terminal.session.send({
             type: 'stdin',
             content: [`/scratch/public/repro_containers/vllm_container.sh ${model}\n`],
           });
           
-          statusMessage = `Running model: ${model}`;
+          statusMessage = `Starting model: ${model}`;
           statusWidget.node.textContent = statusMessage;
+          modelSelect.disabled = true;
+          runModelButton.disabled = true;
           
         } catch (error) {
           console.error('Failed to run the model:', error);
@@ -429,9 +466,15 @@ ${username}@${host}`;
               statusWidget.node.textContent = statusMessage;
               console.log('STDOUT:', statusMessage);
               try {
+                // const isConnected = await checkServerConnection(terminal2);
+                // if (isConnected) {
+                //     //TODO: use the 'scancel jobid' command to stop the vllm service
+                // }
                 terminal2.session.send({type: 'stdin', content: [`exit\n`],});
-                terminal2.session.send({type: 'stdin', content: [`exit\n`],});
-                  // the second terminal command does not work
+                if (terminal2) {
+                    // Remove the widget from the shell
+                    terminal2.dispose();
+                }
                   // TODO: close terminal2
               } catch (error) {
                 console.error('Failed to stop the tunnel:', error);
@@ -440,8 +483,9 @@ ${username}@${host}`;
               }
             }
 
+            // The condition below may not be needed
             if (terminal) {
-              statusMessage = 'Stopping the model and closing the terminal.';
+              statusMessage = `Stopping model: ${model}`;
               statusWidget.node.textContent = statusMessage;
               console.log('STDOUT:', statusMessage);
                 // perhaps it is better to use scancel in terminal2
@@ -456,9 +500,6 @@ ${username}@${host}`;
                 statusWidget.node.textContent = statusMessage;
               }
             }
-
-            statusMessage = `Stopping model: ${model}`;
-            statusWidget.node.textContent = statusMessage;
           // } else {
           //   console.error(`Health check failed with status: ${response.status}`);
           //   statusMessage = 'Model health check failed.';
