@@ -317,8 +317,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
 ${username}@${host}`;
                           console.log(`Generated SSH Command: "${sshCommand}"`);
                           
-                          // login1.hb.hpc.rug.nl71083:~/develop/bsshconn> ssh -L 8000:a100gpu6:8000 p270806@l
-                          // (p270806@login1.hb.hpc.rug.nl) Password: 
+                          // login1.hb.hpc.rug.nl71083:~/develop/bsshconn> ssh -L 8000:a100gpu6:8000
+                          // number@login1.hb.hpc.rug.nl) Password: 
                           // bind [::1]:8000: Cannot assign requested address
                           // Welcome to the login1 node of the Hábrók cluster!
                           
