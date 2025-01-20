@@ -197,6 +197,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       let terminal: Terminal | null = null;
       let terminal2: Terminal | null = null;
 
+      // TODO: investigate how to set the port in jupyter ai 'OPEN_API-BASE'
         
       connectButton?.addEventListener('click', async () => {
         const username = (content.node.querySelector('#username') as HTMLInputElement).value;
