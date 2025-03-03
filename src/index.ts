@@ -161,10 +161,11 @@ const plugin: JupyterFrontEndPlugin<void> = {
             <label for="model-select">Select a Model:</label>
             <select id="model-select" name="model-select" style="width: 100%; padding: 8px;">
                 <option value="google/gemma-2b">google/gemma-2b</option>
-                <option value="mistralai/Mistral-7B-v0.1">mistralai/Mistral-7B-v0.1</option>
+                <option value="mistralai/Mistral-7B-Instruct-v0.3">mistralai/Mistral-7B-Instruct-v0.3</option>
                 <option value="neuralmagic/Meta-Llama-3.1-8B-Instruct-quantized.w8a16" selected>
                     neuralmagic/Meta-Llama-3.1-8B-Instruct-quantized.w8a16
                 </option>
+                <option value="Whisper">Whisper</option>
             </select>
           </div>
           <div style="margin-top: 20px;">
@@ -291,15 +292,15 @@ const plugin: JupyterFrontEndPlugin<void> = {
                         node = nodeMatch[1];
                         console.log('Node/Host:', node);
                     }
-                    if (terminalMessage.toLowerCase().includes('first task exited')) {
+                  } else if (terminalMessage.toLowerCase().includes('first task exited')) {
                       stopModelButton.disabled = true;
                       runModelButton.disabled = false;
                       modelSelect.disabled = false;
                       statusMessage = 'You can now select and run a model.';
                       console.log(statusMessage);
                       statusWidget.node.textContent = statusMessage;
-                    }
                   }
+                  
                   // Extract the port where vLLM is served
                   else if (terminalMessage.toLowerCase().includes('uvicorn running on')) {
                     const portMatch = terminalMessage.match(/http:\/\/\S+:(\d+)/);
@@ -314,8 +315,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
                           const localPort = port;
                           stopModelButton.disabled = false;
                           console.log(`Port forwarding host: "${host}"`);
-                          const sshCommand = `ssh -L 127.0.0.1:${localPort}:${node}:${port} \\
-${username}@${host}`;
+                          const sshCommand = `ssh -L 127.0.0.1:${localPort}:${node}:${port} ${username}@${host}`;
                           console.log(`Generated SSH Command: "${sshCommand}"`);
                           
                           // login1.hb.hpc.rug.nl71083:~/develop/bsshconn> ssh -L 8000:a100gpu6:8000
@@ -331,6 +331,10 @@ ${username}@${host}`;
  
                         }
                     }
+                  }
+                  else if (terminalMessage.toLowerCase().includes('application startup complete')) {
+                    statusMessage = 'vLLM up and running. You can now interact with the model.';
+                    statusWidget.node.textContent = statusMessage;
                   }
               } else if (message.type === 'disconnect') {
                   statusMessage = 'Terminal disconnected.';
@@ -362,7 +366,7 @@ ${username}@${host}`;
                           }
                           else if (terminal2Message.toLowerCase().includes('welcome to')) {
                             // connectedToHPC = true;
-                            statusMessage = 'VLLM running and ready to accept requests!';
+                            statusMessage = 'SSH tunnel established!';
                             statusWidget.node.textContent = statusMessage;
                             console.log('STDOUT:', statusMessage);
                             
@@ -390,9 +394,13 @@ ${username}@${host}`;
         const model = (content.node.querySelector('#model-select') as HTMLSelectElement).value;
         try {
 
+          const command = model === "Whisper" 
+              ? `/scratch/public/repro_containers/whisper/whisper_container.sh\n`
+              : `/scratch/public/repro_containers/vllm_container_dynamic_port.sh ${model}\n`;
+        
           terminal.session.send({
             type: 'stdin',
-            content: [`/scratch/public/repro_containers/vllm_container.sh ${model}\n`],
+            content: [command],
           });
           
           statusMessage = `Starting model: ${model}`;
