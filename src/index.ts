@@ -178,6 +178,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
       // Variable to store the connection process state
       // let connectedToHPC = false;
+      
       let jobid: string | null = null;
       let node: string | null = null;
       let port: string | null = null;
@@ -253,8 +254,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
          // Attach a listener for messages received from the terminal
          terminal?.session.messageReceived.connect((_, message) => {
               if (message.type === 'stdout') {
+                // console.log('STDOUT:', message.content);
+                  
                   let terminalMessage = message.content?.join('') || '';
-                  // console.log('STDOUT:', statusMessage);
+                  //  console.log('STDOUT:', terminalMessage);
                   // statusWidget.node.textContent = statusMessage;
 
                   // Handle SSH host authenticity prompt
@@ -280,17 +283,23 @@ const plugin: JupyterFrontEndPlugin<void> = {
                     connectButton.disabled = true;
                   }
                   // Extract jobid and node/host
-                  else if (terminalMessage.includes('job') || statusMessage.includes('nodes')) {
+                  else if (terminalMessage.includes('srun: Nodes') ) {
                     statusWidget.node.textContent = terminalMessage;
-                    const jobMatch = terminalMessage.match(/job (\d+)/);
-                    const nodeMatch = terminalMessage.match(/Nodes (\S+)/);
-                    if (jobMatch) {
-                        jobid = jobMatch[1];
-                        console.log('Job ID:', jobid);
-                    }
+                    const nodeMatch = terminalMessage.match(/Nodes\s+(\S+)/);
+                    const jobidMatch = terminalMessage.match(/jobid\s+(\d+)/);
+
                     if (nodeMatch) {
-                        node = nodeMatch[1];
-                        console.log('Node/Host:', node);
+                        node = nodeMatch[1]
+                        console.log("Node:", nodeMatch[1]); // Expected Output: a100gpu6
+                    } else {
+                        console.log("No node found");
+                    }
+
+                    if (jobidMatch) {
+                        jobid = jobidMatch[1]
+                        console.log("Job ID:", jobidMatch[1]); // Expected Output: 15505086
+                    } else {
+                        console.log("No job ID found");
                     }
                   } else if (terminalMessage.toLowerCase().includes('first task exited')) {
                       stopModelButton.disabled = true;
@@ -299,10 +308,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
                       statusMessage = 'You can now select and run a model.';
                       console.log(statusMessage);
                       statusWidget.node.textContent = statusMessage;
-                  }
-                  
-                  // Extract the port where vLLM is served
-                  else if (terminalMessage.toLowerCase().includes('uvicorn running on')) {
+                  } else if (terminalMessage.toLowerCase().includes('uvicorn running on')) {
+                    // Extract the port where vLLM is served
                     const portMatch = terminalMessage.match(/http:\/\/\S+:(\d+)/);
                     if (portMatch) {
                         port = portMatch[1];
